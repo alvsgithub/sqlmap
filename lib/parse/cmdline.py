@@ -294,7 +294,7 @@ def cmdLineParser():
                                   "default %d)" % defaults.level)
 
         detection.add_option("--risk", dest="risk", type="int",
-                             help="Risk of tests to perform (0-3, "
+                             help="Risk of tests to perform (1-3, "
                                   "default %d)" % defaults.level)
 
         detection.add_option("--string", dest="string",
@@ -606,7 +606,10 @@ def cmdLineParser():
                             help="Force character encoding used for data retrieval")
 
         general.add_option("--crawl", dest="crawlDepth", type="int",
-                                  help="Crawl the website starting from the target URL")
+                            help="Crawl the website starting from the target URL")
+
+        general.add_option("--crawl-exclude", dest="crawlExclude",
+                           help="Regexp to exclude pages from crawling (e.g. \"logout\")")
 
         general.add_option("--csv-del", dest="csvDel",
                                   help="Delimiting character used in CSV output "
@@ -694,7 +697,7 @@ def cmdLineParser():
 
         miscellaneous.add_option("--identify-waf", dest="identifyWaf",
                                   action="store_true",
-                                  help="Make a through testing for a WAF/IPS/IDS protection")
+                                  help="Make a thorough testing for a WAF/IPS/IDS protection")
 
         miscellaneous.add_option("--mobile", dest="mobile",
                                   action="store_true",
@@ -710,7 +713,7 @@ def cmdLineParser():
 
         miscellaneous.add_option("--smart", dest="smart",
                                   action="store_true",
-                                  help="Conduct through tests only if positive heuristic(s)")
+                                  help="Conduct thorough tests only if positive heuristic(s)")
 
         miscellaneous.add_option("--sqlmap-shell", dest="sqlmapShell", action="store_true",
                             help="Prompt for an interactive sqlmap shell")
