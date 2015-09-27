@@ -6,7 +6,6 @@ See the file 'doc/COPYING' for copying permission
 """
 
 import os
-import random
 import re
 import subprocess
 import string
@@ -43,6 +42,9 @@ CONSTANT_RATIO = 0.9
 # Ratio used in heuristic check for WAF/IDS/IPS protected targets
 IDS_WAF_CHECK_RATIO = 0.5
 
+# Timeout used in heuristic check for WAF/IDS/IPS protected targets
+IDS_WAF_CHECK_TIMEOUT = 10
+
 # Lower and upper values for match ratio in case of stable page
 LOWER_RATIO_BOUND = 0.02
 UPPER_RATIO_BOUND = 0.98
@@ -50,6 +52,7 @@ UPPER_RATIO_BOUND = 0.98
 # Markers for special cases when parameter values contain html encoded characters
 PARAMETER_AMP_MARKER = "__AMP__"
 PARAMETER_SEMICOLON_MARKER = "__SEMICOLON__"
+BOUNDARY_BACKSLASH_MARKER = "__BACKSLASH__"
 PARTIAL_VALUE_MARKER = "__PARTIAL_VALUE__"
 PARTIAL_HEX_VALUE_MARKER = "__PARTIAL_HEX_VALUE__"
 URI_QUESTION_MARKER = "__QUESTION_MARK__"
@@ -74,6 +77,12 @@ GOOGLE_REGEX = r"url\?\w+=((?![^>]+webcache\.googleusercontent\.com)http[^>]+)&(
 
 # Regular expression used for extracting results from DuckDuckGo search
 DUCKDUCKGO_REGEX = r'"u":"([^"]+)'
+
+# Regular expression used for extracting results from Disconnect Search
+DISCONNECT_SEARCH_REGEX = r'<p class="url wrapword">([^<]+)</p>'
+
+# Dummy user agent for search (if default one returns different results)
+DUMMY_SEARCH_USER_AGENT = "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:40.0) Gecko/20100101 Firefox/40.0"
 
 # Regular expression used for extracting content from "textual" tags
 TEXT_TAG_REGEX = r"(?si)<(abbr|acronym|b|blockquote|br|center|cite|code|dt|em|font|h\d|i|li|p|pre|q|strong|sub|sup|td|th|title|tt|u)(?!\w).*?>(?P<result>[^<]+)"
@@ -273,7 +282,7 @@ ERROR_PARSING_REGEXES = (
 META_CHARSET_REGEX = r'(?si)<head>.*<meta[^>]+charset="?(?P<result>[^"> ]+).*</head>'
 
 # Regular expression used for parsing refresh info from meta html headers
-META_REFRESH_REGEX = r'(?si)<head>.*<meta http-equiv="?refresh"?[^>]+content="?[^">]+url=["\']?(?P<result>[^\'">]+).*</head>'
+META_REFRESH_REGEX = r'(?si)<head>(?!.*?<noscript.*?</head).*?<meta http-equiv="?refresh"?[^>]+content="?[^">]+url=["\']?(?P<result>[^\'">]+).*</head>'
 
 # Regular expression used for parsing empty fields in tested form data
 EMPTY_FORM_FIELDS_REGEX = r'(&|\A)(?P<result>[^=]+=(&|\Z))'
@@ -323,11 +332,11 @@ CUSTOM_INJECTION_MARK_CHAR = '*'
 # Other way to declare injection position
 INJECT_HERE_MARK = '%INJECT HERE%'
 
-# Maximum length used for retrieving data over MySQL error based payload due to "known" problems with longer result strings
-MYSQL_ERROR_CHUNK_LENGTH = 50
+# Minimum chunk length used for retrieving data over error based payloads
+MIN_ERROR_CHUNK_LENGTH = 8
 
-# Maximum length used for retrieving data over MSSQL error based payload due to trimming problems with longer result strings
-MSSQL_ERROR_CHUNK_LENGTH = 100
+# Maximum chunk length used for retrieving data over error based payloads
+MAX_ERROR_CHUNK_LENGTH = 1024
 
 # Do not escape the injected statement if it contains any of the following SQL keywords
 EXCLUDE_UNESCAPE = ("WAITFOR DELAY ", " INTO DUMPFILE ", " INTO OUTFILE ", "CREATE ", "BULK ", "EXEC ", "RECONFIGURE ", "DECLARE ", "'%s'" % CHAR_INFERENCE_MARK)
@@ -386,6 +395,9 @@ CODECS_LIST_PAGE = "http://docs.python.org/library/codecs.html#standard-encoding
 # Simple regular expression used to distinguish scalar from multiple-row commands (not sole condition)
 SQL_SCALAR_REGEX = r"\A(SELECT(?!\s+DISTINCT\(?))?\s*\w*\("
 
+# Option/switch values to ignore during configuration save
+IGNORE_SAVE_OPTIONS = ("saveConfig",)
+
 # IP address of the localhost
 LOCALHOST = "127.0.0.1"
 
@@ -433,6 +445,9 @@ BRUTE_COLUMN_EXISTS_TEMPLATE = "EXISTS(SELECT %s FROM %s)"
 
 # Payload used for checking of existence of IDS/WAF (dummier the better)
 IDS_WAF_CHECK_PAYLOAD = "AND 1=1 UNION ALL SELECT 1,2,3,table_name FROM information_schema.tables WHERE 2>1-- ../../../etc/passwd"
+
+# Data inside shellcodeexec to be filled with random string
+SHELLCODEEXEC_RANDOM_STRING_MARKER = "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
 
 # Vectors used for provoking specific WAF/IDS/IPS behavior(s)
 WAF_ATTACK_VECTORS = (
@@ -483,7 +498,7 @@ DEFAULT_COOKIE_DELIMITER = ';'
 FORCE_COOKIE_EXPIRATION_TIME = "9999999999"
 
 # Github OAuth token used for creating an automatic Issue for unhandled exceptions
-GITHUB_REPORT_OAUTH_TOKEN = "f05e68171afd41a445b1fff80f369fae88b37968"
+GITHUB_REPORT_OAUTH_TOKEN = "YzQzM2M2YzgzMDExN2I5ZDMyYjAzNTIzODIwZDA2MDFmMmVjODI1Ng=="
 
 # Skip unforced HashDB flush requests below the threshold number of cached items
 HASHDB_FLUSH_THRESHOLD = 32
@@ -610,6 +625,9 @@ MIN_ENCODED_LEN_CHECK = 5
 
 # Timeout in seconds in which Metasploit remote session has to be initialized
 METASPLOIT_SESSION_TIMEOUT = 300
+
+# Reference: http://www.postgresql.org/docs/9.0/static/catalog-pg-largeobject.html
+LOBLKSIZE = 2048
 
 # Suffix used to mark variables having keyword names
 EVALCODE_KEYWORD_SUFFIX = "_KEYWORD"

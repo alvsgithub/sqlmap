@@ -6,6 +6,7 @@ See the file 'doc/COPYING' for copying permission
 """
 
 import os
+import sys
 
 from lib.core.agent import agent
 from lib.core.common import dataToOutFile
@@ -13,6 +14,7 @@ from lib.core.common import Backend
 from lib.core.common import checkFile
 from lib.core.common import decloakToTemp
 from lib.core.common import decodeHexValue
+from lib.core.common import getUnicode
 from lib.core.common import isNumPosStrValue
 from lib.core.common import isListLike
 from lib.core.common import isStackingAvailable
@@ -42,7 +44,7 @@ class Filesystem:
             lengthQuery = "LENGTH(LOAD_FILE('%s'))" % remoteFile
 
         elif Backend.isDbms(DBMS.PGSQL) and not fileRead:
-            lengthQuery = "SELECT LENGTH(data) FROM pg_largeobject WHERE loid=%d" % self.oid
+            lengthQuery = "SELECT SUM(LENGTH(data)) FROM pg_largeobject WHERE loid=%d" % self.oid
 
         elif Backend.isDbms(DBMS.MSSQL):
             self.createSupportTbl(self.fileTblName, self.tblField, "VARBINARY(MAX)")
@@ -53,27 +55,28 @@ class Filesystem:
         localFileSize = os.path.getsize(localFile)
 
         if fileRead and Backend.isDbms(DBMS.PGSQL):
-            logger.info("length of read file %s cannot be checked on PostgreSQL" % remoteFile)
+            logger.info("length of read file '%s' cannot be checked on PostgreSQL" % remoteFile)
             sameFile = True
         else:
-            logger.debug("checking the length of the remote file %s" % remoteFile)
+            logger.debug("checking the length of the remote file '%s'" % remoteFile)
             remoteFileSize = inject.getValue(lengthQuery, resumeValue=False, expected=EXPECTED.INT, charsetType=CHARSET_TYPE.DIGITS)
             sameFile = None
 
             if isNumPosStrValue(remoteFileSize):
                 remoteFileSize = long(remoteFileSize)
+                localFile = getUnicode(localFile, encoding=sys.getfilesystemencoding())
                 sameFile = False
 
                 if localFileSize == remoteFileSize:
                     sameFile = True
-                    infoMsg = "the local file %s and the remote file " % localFile
-                    infoMsg += "%s have the same size (%db)" % (remoteFile, localFileSize)
+                    infoMsg = "the local file '%s' and the remote file " % localFile
+                    infoMsg += "'%s' have the same size (%d B)" % (remoteFile, localFileSize)
                 elif remoteFileSize > localFileSize:
-                    infoMsg = "the remote file %s is larger (%db) than " % (remoteFile, remoteFileSize)
-                    infoMsg += "the local file %s (%db)" % (localFile, localFileSize)
+                    infoMsg = "the remote file '%s' is larger (%d B) than " % (remoteFile, remoteFileSize)
+                    infoMsg += "the local file '%s' (%dB)" % (localFile, localFileSize)
                 else:
-                    infoMsg = "the remote file %s is smaller (%db) than " % (remoteFile, remoteFileSize)
-                    infoMsg += "file %s (%db)" % (localFile, localFileSize)
+                    infoMsg = "the remote file '%s' is smaller (%d B) than " % (remoteFile, remoteFileSize)
+                    infoMsg += "file '%s' (%d B)" % (localFile, localFileSize)
 
                 logger.info(infoMsg)
             else:
@@ -105,20 +108,27 @@ class Filesystem:
 
         return sqlQueries
 
-    def fileEncode(self, fileName, encoding, single):
+    def fileEncode(self, fileName, encoding, single, chunkSize=256):
         """
         Called by MySQL and PostgreSQL plugins to write a file on the
         back-end DBMS underlying file system
         """
 
-        retVal = []
         with open(fileName, "rb") as f:
-            content = f.read().encode(encoding).replace("\n", "")
+            content = f.read()
+
+        return self.fileContentEncode(content, encoding, single, chunkSize)
+
+    def fileContentEncode(self, content, encoding, single, chunkSize=256):
+        retVal = []
+
+        if encoding:
+            content = content.encode(encoding).replace("\n", "")
 
         if not single:
-            if len(content) > 256:
-                for i in xrange(0, len(content), 256):
-                    _ = content[i:i + 256]
+            if len(content) > chunkSize:
+                for i in xrange(0, len(content), chunkSize):
+                    _ = content[i:i + chunkSize]
 
                     if encoding == "hex":
                         _ = "0x%s" % _
@@ -143,7 +153,7 @@ class Filesystem:
         if forceCheck is not True:
             message = "do you want confirmation that the local file '%s' " % localFile
             message += "has been successfully written on the back-end DBMS "
-            message += "file system (%s)? [Y/n] " % remoteFile
+            message += "file system ('%s')? [Y/n] " % remoteFile
             output = readInput(message, default="Y")
 
         if forceCheck or (output and output.lower() == "y"):
@@ -232,7 +242,7 @@ class Filesystem:
                 fileContent = newFileContent
 
             if fileContent is not None:
-                fileContent = decodeHexValue(fileContent)
+                fileContent = decodeHexValue(fileContent, True)
 
                 if fileContent:
                     localFilePath = dataToOutFile(remoteFile, fileContent)
@@ -266,14 +276,14 @@ class Filesystem:
 
         if conf.direct or isStackingAvailable():
             if isStackingAvailable():
-                debugMsg = "going to upload the %s file with " % fileType
+                debugMsg = "going to upload the file '%s' with " % fileType
                 debugMsg += "stacked query SQL injection technique"
                 logger.debug(debugMsg)
 
             written = self.stackedWriteFile(localFile, remoteFile, fileType, forceCheck)
             self.cleanup(onlyFileTbl=True)
         elif isTechniqueAvailable(PAYLOAD.TECHNIQUE.UNION) and Backend.isDbms(DBMS.MYSQL):
-            debugMsg = "going to upload the %s file with " % fileType
+            debugMsg = "going to upload the file '%s' with " % fileType
             debugMsg += "UNION query SQL injection technique"
             logger.debug(debugMsg)
 

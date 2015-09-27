@@ -9,6 +9,7 @@ import cookielib
 import glob
 import inspect
 import logging
+import httplib
 import os
 import random
 import re
@@ -26,6 +27,7 @@ import lib.core.common
 import lib.core.threads
 import lib.core.convert
 import lib.request.connect
+import lib.utils.google
 
 from lib.controller.checks import checkConnection
 from lib.core.common import Backend
@@ -33,6 +35,7 @@ from lib.core.common import boldifyMessage
 from lib.core.common import checkFile
 from lib.core.common import dataToStdout
 from lib.core.common import getPublicTypeMembers
+from lib.core.common import getSafeExString
 from lib.core.common import extractRegexResult
 from lib.core.common import filterStringValue
 from lib.core.common import findPageForms
@@ -53,7 +56,6 @@ from lib.core.common import readInput
 from lib.core.common import resetCookieJar
 from lib.core.common import runningAsAdmin
 from lib.core.common import safeExpandUser
-from lib.core.common import sanitizeStr
 from lib.core.common import setOptimize
 from lib.core.common import setPaths
 from lib.core.common import singleTimeWarnMessage
@@ -90,6 +92,7 @@ from lib.core.exception import SqlmapInstallationException
 from lib.core.exception import SqlmapMissingDependence
 from lib.core.exception import SqlmapMissingMandatoryOptionException
 from lib.core.exception import SqlmapMissingPrivileges
+from lib.core.exception import SqlmapNoneDataException
 from lib.core.exception import SqlmapSilentQuitException
 from lib.core.exception import SqlmapSyntaxException
 from lib.core.exception import SqlmapSystemException
@@ -107,6 +110,7 @@ from lib.core.settings import DEFAULT_PAGE_ENCODING
 from lib.core.settings import DEFAULT_TOR_HTTP_PORTS
 from lib.core.settings import DEFAULT_TOR_SOCKS_PORT
 from lib.core.settings import DUMMY_URL
+from lib.core.settings import IGNORE_SAVE_OPTIONS
 from lib.core.settings import INJECT_HERE_MARK
 from lib.core.settings import IS_WIN
 from lib.core.settings import KB_CHARS_BOUNDARY_CHAR
@@ -289,7 +293,7 @@ def _feedTargetsDict(reqFile, addedTargetUrls):
                 line = line.strip('\r')
                 match = re.search(r"\A(%s) (.+) HTTP/[\d.]+\Z" % "|".join(getPublicTypeMembers(HTTPMETHOD, True)), line) if not method else None
 
-                if len(line) == 0 and method and method != HTTPMETHOD.GET and data is None:
+                if len(line.strip()) == 0 and method and method != HTTPMETHOD.GET and data is None:
                     data = ""
                     params = True
 
@@ -311,8 +315,9 @@ def _feedTargetsDict(reqFile, addedTargetUrls):
                     params = True
 
                 # Headers
-                elif re.search(r"\A\S+: ", line):
-                    key, value = line.split(": ", 1)
+                elif re.search(r"\A\S+:", line):
+                    key, value = line.split(":", 1)
+                    value = value.strip().replace("\r", "").replace("\n", "")
 
                     # Cookie and Host headers
                     if key.upper() == HTTP_HEADER.COOKIE.upper():
@@ -636,7 +641,7 @@ def _setBulkMultipleTargets():
     for line in getFileItems(conf.bulkFile):
         if re.match(r"[^ ]+\?(.+)", line, re.I) or CUSTOM_INJECTION_MARK_CHAR in line:
             found = True
-            kb.targets.add((line.strip(), None, None, None, None))
+            kb.targets.add((line.strip(), conf.method, conf.data, conf.cookie, None))
 
     if not found and not conf.forms and not conf.crawlDepth:
         warnMsg = "no usable links found (with GET parameters)"
@@ -766,8 +771,14 @@ def _setMetasploit():
 
     if conf.msfPath:
         for path in (conf.msfPath, os.path.join(conf.msfPath, "bin")):
-            if all(os.path.exists(normalizePath(os.path.join(path, _))) for _ in ("", "msfcli", "msfconsole", "msfencode", "msfpayload")):
+            if any(os.path.exists(normalizePath(os.path.join(path, _))) for _ in ("msfcli", "msfconsole")):
                 msfEnvPathExists = True
+                if all(os.path.exists(normalizePath(os.path.join(path, _))) for _ in ("msfvenom",)):
+                    kb.oldMsf = False
+                elif all(os.path.exists(normalizePath(os.path.join(path, _))) for _ in ("msfencode", "msfpayload")):
+                    kb.oldMsf = True
+                else:
+                    msfEnvPathExists = False
                 conf.msfPath = path
                 break
 
@@ -798,15 +809,23 @@ def _setMetasploit():
         for envPath in envPaths:
             envPath = envPath.replace(";", "")
 
-            if all(os.path.exists(normalizePath(os.path.join(envPath, _))) for _ in ("", "msfcli", "msfconsole", "msfencode", "msfpayload")):
-                infoMsg = "Metasploit Framework has been found "
-                infoMsg += "installed in the '%s' path" % envPath
-                logger.info(infoMsg)
-
+            if all(os.path.exists(normalizePath(os.path.join(envPath, _))) for _ in ("", "msfcli", "msfconsole")):
                 msfEnvPathExists = True
-                conf.msfPath = envPath
+                if all(os.path.exists(normalizePath(os.path.join(envPath, _))) for _ in ("msfvenom",)):
+                    kb.oldMsf = False
+                elif all(os.path.exists(normalizePath(os.path.join(envPath, _))) for _ in ("msfencode", "msfpayload")):
+                    kb.oldMsf = True
+                else:
+                    msfEnvPathExists = False
 
-                break
+                if msfEnvPathExists:
+                    infoMsg = "Metasploit Framework has been found "
+                    infoMsg += "installed in the '%s' path" % envPath
+                    logger.info(infoMsg)
+
+                    conf.msfPath = envPath
+
+                    break
 
     if not msfEnvPathExists:
         errMsg = "unable to locate Metasploit Framework installation. "
@@ -1067,18 +1086,22 @@ def _setHTTPProxy():
         if hasattr(proxyHandler, "%s_open" % _):
             delattr(proxyHandler, "%s_open" % _)
 
-    if not conf.proxy:
-        if conf.proxyList:
-            conf.proxy = conf.proxyList[0]
-            conf.proxyList = conf.proxyList[1:] + conf.proxyList[:1]
+    if conf.proxyList is not None:
+        if not conf.proxyList:
+            errMsg = "list of usable proxies is exhausted"
+            raise SqlmapNoneDataException(errMsg)
 
-            infoMsg = "loading proxy '%s' from a supplied proxy list file" % conf.proxy
-            logger.info(infoMsg)
-        else:
-            if conf.hostname in ('localhost', '127.0.0.1') or conf.ignoreProxy:
-                proxyHandler.proxies = {}
+        conf.proxy = conf.proxyList[0]
+        conf.proxyList = conf.proxyList[1:]
 
-            return
+        infoMsg = "loading proxy '%s' from a supplied proxy list file" % conf.proxy
+        logger.info(infoMsg)
+
+    elif not conf.proxy:
+        if conf.hostname in ("localhost", "127.0.0.1") or conf.ignoreProxy:
+            proxyHandler.proxies = {}
+
+        return
 
     debugMsg = "setting the HTTP/SOCKS proxy for all HTTP requests"
     logger.debug(debugMsg)
@@ -1110,7 +1133,7 @@ def _setHTTPProxy():
     if conf.proxyCred:
         _ = re.search("^(.*?):(.*?)$", conf.proxyCred)
         if not _:
-            errMsg = "Proxy authentication credentials "
+            errMsg = "proxy authentication credentials "
             errMsg += "value must be in format username:password"
             raise SqlmapSyntaxException(errMsg)
         else:
@@ -1136,21 +1159,63 @@ def _setHTTPProxy():
 
     proxyHandler.__init__(proxyHandler.proxies)
 
-def _setSafeUrl():
+def _setSafeVisit():
     """
-    Check and set the safe URL options.
+    Check and set the safe visit options.
     """
-    if not conf.safUrl:
+    if not any ((conf.safeUrl, conf.safeReqFile)):
         return
 
-    if not re.search("^http[s]*://", conf.safUrl):
-        if ":443/" in conf.safUrl:
-            conf.safUrl = "https://" + conf.safUrl
-        else:
-            conf.safUrl = "http://" + conf.safUrl
+    if conf.safeReqFile:
+        checkFile(conf.safeReqFile)
 
-    if conf.saFreq <= 0:
-        errMsg = "please provide a valid value (>0) for safe frequency (--safe-freq) while using safe URL feature"
+        raw = readCachedFileContent(conf.safeReqFile)
+        match = re.search(r"\A([A-Z]+) ([^ ]+) HTTP/[0-9.]+\Z", raw[:raw.find('\n')])
+
+        if match:
+            kb.safeReq.method = match.group(1)
+            kb.safeReq.url = match.group(2)
+            kb.safeReq.headers = {}
+
+            for line in raw[raw.find('\n') + 1:].split('\n'):
+                line = line.strip()
+                if line and ':' in line:
+                    key, value = line.split(':', 1)
+                    value = value.strip()
+                    kb.safeReq.headers[key] = value
+                    if key == HTTP_HEADER.HOST:
+                        if not value.startswith("http"):
+                            scheme = "http"
+                            if value.endswith(":443"):
+                                scheme = "https"
+                            value = "%s://%s" % (scheme, value)
+                        kb.safeReq.url = urlparse.urljoin(value, kb.safeReq.url)
+                else:
+                    break
+
+            post = None
+
+            if '\r\n\r\n' in raw:
+                post = raw[raw.find('\r\n\r\n') + 4:]
+            elif '\n\n' in raw:
+                post = raw[raw.find('\n\n') + 2:]
+
+            if post and post.strip():
+                kb.safeReq.post = post
+            else:
+                kb.safeReq.post = None
+        else:
+            errMsg = "invalid format of a safe request file"
+            raise SqlmapSyntaxException, errMsg
+    else:
+        if not re.search("^http[s]*://", conf.safeUrl):
+            if ":443/" in conf.safeUrl:
+                conf.safeUrl = "https://" + conf.safeUrl
+            else:
+                conf.safeUrl = "http://" + conf.safeUrl
+
+    if conf.safeFreq <= 0:
+        errMsg = "please provide a valid value (>0) for safe frequency (--safe-freq) while using safe visit features"
         raise SqlmapSyntaxException(errMsg)
 
 def _setPrefixSuffix():
@@ -1283,6 +1348,9 @@ def _setHTTPExtraHeaders():
         conf.headers = conf.headers.split("\n") if "\n" in conf.headers else conf.headers.split("\\n")
 
         for headerValue in conf.headers:
+            if not headerValue.strip():
+                continue
+
             if headerValue.count(':') >= 1:
                 header, value = (_.lstrip() for _ in headerValue.split(":", 1))
 
@@ -1462,7 +1530,7 @@ def _createTemporaryDirectory():
             os.makedirs(tempfile.gettempdir())
     except IOError, ex:
         errMsg = "there has been a problem while accessing "
-        errMsg += "system's temporary directory location(s) ('%s'). Please " % ex
+        errMsg += "system's temporary directory location(s) ('%s'). Please " % getSafeExString(ex)
         errMsg += "make sure that there is enough disk space left. If problem persists, "
         errMsg += "try to set environment variable 'TEMP' to a location "
         errMsg += "writeable by the current user"
@@ -1519,6 +1587,9 @@ def _cleanupOptions():
         conf.skip = re.split(PARAMETER_SPLITTING_REGEX, conf.skip)
     else:
         conf.skip = []
+
+    if conf.cookie:
+        conf.cookie = re.sub(r"[\r\n]", "", conf.cookie)
 
     if conf.delay:
         conf.delay = float(conf.delay)
@@ -1627,6 +1698,13 @@ def _cleanupOptions():
     threadData = getCurrentThreadData()
     threadData.reset()
 
+def _dirtyPatches():
+    """
+    Place for "dirty" Python related patches
+    """
+
+    httplib._MAXLINE = 1 * 1024 * 1024  # to accept overly long result lines (e.g. SQLi results in HTTP header responses)
+
 def _purgeOutput():
     """
     Safely removes (purges) output directory.
@@ -1663,7 +1741,7 @@ def _setConfAttributes():
     conf.parameters = {}
     conf.path = None
     conf.port = None
-    conf.proxyList = []
+    conf.proxyList = None
     conf.resultsFilename = None
     conf.resultsFP = None
     conf.scheme = None
@@ -1724,11 +1802,14 @@ def _setKnowledgeBaseAttributes(flushAll=True):
     kb.endDetection = False
     kb.explicitSettings = set()
     kb.extendTests = None
+    kb.errorChunkLength = None
     kb.errorIsNone = True
     kb.fileReadMode = False
     kb.followSitemapRecursion = None
     kb.forcedDbms = None
     kb.forcePartialUnion = False
+    kb.forceWhere = None
+    kb.futileUnion = None
     kb.headersFp = {}
     kb.heuristicDbms = None
     kb.heuristicMode = False
@@ -1755,9 +1836,11 @@ def _setKnowledgeBaseAttributes(flushAll=True):
     kb.multiThreadMode = False
     kb.negativeLogic = False
     kb.nullConnection = None
+    kb.oldMsf = None
     kb.orderByColumns = None
     kb.originalCode = None
     kb.originalPage = None
+    kb.originalPageTime = None
     kb.originalTimeDelay = None
     kb.originalUrls = dict()
 
@@ -1791,8 +1874,10 @@ def _setKnowledgeBaseAttributes(flushAll=True):
     kb.responseTimes = []
     kb.resumeValues = True
     kb.safeCharEncode = False
+    kb.safeReq = AttribDict()
     kb.singleLogFlags = set()
     kb.reduceTests = None
+    kb.tlsSNI = None
     kb.stickyDBMS = False
     kb.stickyLevel = None
     kb.storeCrawlingChoice = None
@@ -1801,6 +1886,7 @@ def _setKnowledgeBaseAttributes(flushAll=True):
     kb.technique = None
     kb.tempDir = None
     kb.testMode = False
+    kb.testOnlyCustom = False
     kb.testQueryCount = 0
     kb.testType = None
     kb.threadContinue = True
@@ -1890,16 +1976,16 @@ def _useWizardInterface():
 
     dataToStdout("\nsqlmap is running, please wait..\n\n")
 
-def _saveCmdline():
+def _saveConfig():
     """
-    Saves the command line options on a sqlmap configuration INI file
+    Saves the command line options to a sqlmap configuration INI file
     Format.
     """
 
-    if not conf.saveCmdline:
+    if not conf.saveConfig:
         return
 
-    debugMsg = "saving command line options on a sqlmap configuration INI file"
+    debugMsg = "saving command line options to a sqlmap configuration INI file"
     logger.debug(debugMsg)
 
     config = UnicodeRawConfigParser()
@@ -1922,6 +2008,9 @@ def _saveCmdline():
             if datatype and isListLike(datatype):
                 datatype = datatype[0]
 
+            if option in IGNORE_SAVE_OPTIONS:
+                continue
+
             if value is None:
                 if datatype == OPTION_TYPE.BOOLEAN:
                     value = "False"
@@ -1938,16 +2027,16 @@ def _saveCmdline():
 
             config.set(family, option, value)
 
-    confFP = openFile(paths.SQLMAP_CONFIG, "wb")
+    confFP = openFile(conf.saveConfig, "wb")
 
     try:
         config.write(confFP)
     except IOError, ex:
         errMsg = "something went wrong while trying "
-        errMsg += "to write to the configuration INI file '%s' ('%s')" % (paths.SQLMAP_CONFIG, ex)
+        errMsg += "to write to the configuration file '%s' ('%s')" % (conf.saveConfig, ex)
         raise SqlmapSystemException(errMsg)
 
-    infoMsg = "saved command line options on '%s' configuration file" % paths.SQLMAP_CONFIG
+    infoMsg = "saved command line options to the configuration file '%s'" % conf.saveConfig
     logger.info(infoMsg)
 
 def setVerbosity():
@@ -1985,7 +2074,12 @@ def _mergeOptions(inputOptions, overrideOptions):
     """
 
     if inputOptions.pickledOptions:
-        inputOptions = base64unpickle(inputOptions.pickledOptions)
+        try:
+            inputOptions = base64unpickle(inputOptions.pickledOptions)
+        except Exception, ex:
+            errMsg = "provided invalid value '%s' for option '--pickled-options'" % inputOptions.pickledOptions
+            errMsg += " ('%s')" % ex if ex.message else ""
+            raise SqlmapSyntaxException(errMsg)
 
     if inputOptions.configFile:
         configFileParser(inputOptions.configFile)
@@ -2137,6 +2231,18 @@ def _setTorSocksProxySettings():
     socks.setdefaultproxy(socks.PROXY_TYPE_SOCKS5 if conf.torType == PROXY_TYPE.SOCKS5 else socks.PROXY_TYPE_SOCKS4, LOCALHOST, conf.torPort or DEFAULT_TOR_SOCKS_PORT)
     socks.wrapmodule(urllib2)
 
+def _checkWebSocket():
+    infoMsg = "checking for WebSocket"
+    logger.debug(infoMsg)
+
+    if conf.url and (conf.url.startswith("ws:/") or conf.url.startswith("wss:/")):
+        try:
+            from websocket import ABNF
+        except ImportError:
+            errMsg = "sqlmap requires third-party module 'websocket-client' "
+            errMsg += "in order to use WebSocket funcionality"
+            raise SqlmapMissingDependence(errMsg)
+
 def _checkTor():
     if not conf.checkTor:
         return
@@ -2144,7 +2250,11 @@ def _checkTor():
     infoMsg = "checking Tor connection"
     logger.info(infoMsg)
 
-    page, _, _ = Request.getPage(url="https://check.torproject.org/", raise404=False)
+    try:
+        page, _, _ = Request.getPage(url="https://check.torproject.org/", raise404=False)
+    except SqlmapConnectionException:
+        page = None
+
     if not page or 'Congratulations' not in page:
         errMsg = "it seems that Tor is not properly set. Please try using options '--tor-type' and/or '--tor-port'"
         raise SqlmapConnectionException(errMsg)
@@ -2189,6 +2299,10 @@ def _basicOptionValidation():
 
     if conf.direct and conf.url:
         errMsg = "option '-d' is incompatible with option '-u' ('--url')"
+        raise SqlmapSyntaxException(errMsg)
+
+    if conf.identifyWaf and conf.skipWaf:
+        errMsg = "switch '--identify-waf' is incompatible with switch '--skip-waf'"
         raise SqlmapSyntaxException(errMsg)
 
     if conf.titles and conf.nullConnection:
@@ -2261,6 +2375,18 @@ def _basicOptionValidation():
         errMsg = "option '--crawl-exclude' requires usage of switch '--crawl'"
         raise SqlmapSyntaxException(errMsg)
 
+    if conf.safePost and not conf.safeUrl:
+        errMsg = "option '--safe-post' requires usage of option '--safe-url'"
+        raise SqlmapSyntaxException(errMsg)
+
+    if conf.safeFreq and not any((conf.safeUrl, conf.safeReqFile)):
+        errMsg = "option '--safe-freq' requires usage of option '--safe-url' or '--safe-req'"
+        raise SqlmapSyntaxException(errMsg)
+
+    if conf.safeReqFile and any((conf.safeUrl, conf.safePost)):
+        errMsg = "option '--safe-req' is incompatible with option '--safe-url' and option '--safe-post'"
+        raise SqlmapSyntaxException(errMsg)
+
     if conf.csrfUrl and not conf.csrfToken:
         errMsg = "option '--csrf-url' requires usage of option '--csrf-token'"
         raise SqlmapSyntaxException(errMsg)
@@ -2291,6 +2417,10 @@ def _basicOptionValidation():
 
     if conf.tor and conf.proxy:
         errMsg = "switch '--tor' is incompatible with option '--proxy'"
+        raise SqlmapSyntaxException(errMsg)
+
+    if conf.proxy and conf.proxyFile:
+        errMsg = "switch '--proxy' is incompatible with option '--proxy-file'"
         raise SqlmapSyntaxException(errMsg)
 
     if conf.checkTor and not any((conf.tor, conf.proxy)):
@@ -2360,6 +2490,7 @@ def _resolveCrossReferences():
     lib.core.common.getPageTemplate = getPageTemplate
     lib.core.convert.singleTimeWarnMessage = singleTimeWarnMessage
     lib.request.connect.setHTTPProxy = _setHTTPProxy
+    lib.utils.google.setHTTPProxy = _setHTTPProxy
     lib.controller.checks.setVerbosity = setVerbosity
 
 def initOptions(inputOptions=AttribDict(), overrideOptions=False):
@@ -2378,9 +2509,10 @@ def init():
 
     _useWizardInterface()
     setVerbosity()
-    _saveCmdline()
+    _saveConfig()
     _setRequestFromFile()
     _cleanupOptions()
+    _dirtyPatches()
     _purgeOutput()
     _checkDependencies()
     _createTemporaryDirectory()
@@ -2394,6 +2526,7 @@ def init():
     _setWafFunctions()
     _setTrafficOutputFP()
     _resolveCrossReferences()
+    _checkWebSocket()
 
     parseTargetUrl()
     parseTargetDirect()
@@ -2408,7 +2541,7 @@ def init():
         _setHTTPAuthentication()
         _setHTTPProxy()
         _setDNSCache()
-        _setSafeUrl()
+        _setSafeVisit()
         _setGoogleDorking()
         _setBulkMultipleTargets()
         _setSitemapTargets()

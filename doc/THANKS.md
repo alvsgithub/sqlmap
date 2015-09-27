@@ -173,6 +173,9 @@ Ivan Giacomelli, <truemilk(at)insiberia.net>
 * for suggesting a minor enhancement
 * for reviewing the documentation
 
+Dimitris Giannitsaros, <daremon(at)gmail.com>
+* for contributing a REST-JSON API client
+
 Nico Golde, <nico(at)ngolde.de>
 * for reporting a couple of bugs
 
@@ -620,6 +623,9 @@ abc abc, <biedimc(at)gmx.net>
 
 Abuse 007, <abuse007(at)gmail.com>
 * for reporting a bug
+
+agix, <florian.gaultier@gmail.com>
+* for contributing the file upload via certutil.exe functionality
 
 Alex, <m3zero(at)gmail.com>
 * for reporting a minor bug

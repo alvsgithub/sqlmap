@@ -28,10 +28,12 @@ from lib.core.data import queries
 from lib.core.dicts import DUMP_DATA_PREPROCESS
 from lib.core.dicts import FROM_DUMMY_TABLE
 from lib.core.enums import DBMS
+from lib.core.enums import HTTP_HEADER
 from lib.core.enums import PAYLOAD
 from lib.core.enums import PLACE
 from lib.core.enums import POST_HINT
 from lib.core.exception import SqlmapNoneDataException
+from lib.core.settings import BOUNDARY_BACKSLASH_MARKER
 from lib.core.settings import CUSTOM_INJECTION_MARK_CHAR
 from lib.core.settings import DEFAULT_COOKIE_DELIMITER
 from lib.core.settings import DEFAULT_GET_POST_DELIMITER
@@ -77,7 +79,9 @@ class Agent(object):
 
         retVal = ""
 
-        if where is None and isTechniqueAvailable(kb.technique):
+        if kb.forceWhere:
+            where = kb.forceWhere
+        elif where is None and isTechniqueAvailable(kb.technique):
             where = kb.injection.data[kb.technique].where
 
         if kb.injection.place is not None:
@@ -114,6 +118,11 @@ class Agent(object):
             match = re.search(r"([^;]+)=(?P<value>[^;]+);?\Z", origValue)
             if match:
                 origValue = match.group("value")
+            elif ',' in paramString:
+                header = paramString.split(',')[0]
+
+                if header.upper() == HTTP_HEADER.AUTHORIZATION.upper():
+                    origValue = origValue.split(' ')[-1].split(':')[-1]
 
         if conf.prefix:
             value = origValue
@@ -167,7 +176,10 @@ class Agent(object):
                     while True:
                         _ = re.search(r"\\g<([^>]+)>", repl)
                         if _:
-                            repl = repl.replace(_.group(0), match.group(int(_.group(1)) if _.group(1).isdigit() else _.group(1)))
+                            try:
+                                repl = repl.replace(_.group(0), match.group(int(_.group(1)) if _.group(1).isdigit() else _.group(1)))
+                            except IndexError:
+                                break
                         else:
                             break
                     retVal = string[:match.start()] + repl + string[match.end():]
@@ -178,8 +190,12 @@ class Agent(object):
                 retVal = _(regex, "%s=%s" % (parameter, self.addPayloadDelimiters(newValue.replace("\\", "\\\\"))), paramString)
             else:
                 retVal = _(r"(\A|\b)%s=%s(\Z|%s|%s|\s)" % (re.escape(parameter), re.escape(origValue), DEFAULT_GET_POST_DELIMITER, DEFAULT_COOKIE_DELIMITER), "%s=%s\g<2>" % (parameter, self.addPayloadDelimiters(newValue.replace("\\", "\\\\"))), paramString)
+
             if retVal == paramString and urlencode(parameter) != parameter:
                 retVal = _(r"(\A|\b)%s=%s" % (re.escape(urlencode(parameter)), re.escape(origValue)), "%s=%s" % (urlencode(parameter), self.addPayloadDelimiters(newValue.replace("\\", "\\\\"))), paramString)
+
+        if retVal:
+            retVal = retVal.replace(BOUNDARY_BACKSLASH_MARKER, '\\')
 
         return retVal
 
@@ -202,6 +218,9 @@ class Agent(object):
 
         if conf.direct:
             return self.payloadDirect(expression)
+
+        if expression is None:
+            return None
 
         expression = self.cleanupPayload(expression)
         expression = unescaper.escape(expression)
@@ -231,7 +250,7 @@ class Agent(object):
             if not (expression and expression[0] == ';') and not (query and query[-1] in ('(', ')') and expression and expression[0] in ('(', ')')) and not (query and query[-1] == '('):
                 query += " "
 
-        query = "%s%s" % (query, expression)
+        query = "%s%s" % ((query or "").replace('\\', BOUNDARY_BACKSLASH_MARKER), expression)
 
         return query
 
@@ -243,6 +262,9 @@ class Agent(object):
 
         if conf.direct:
             return self.payloadDirect(expression)
+
+        if expression is None:
+            return None
 
         expression = self.cleanupPayload(expression)
 
@@ -265,7 +287,7 @@ class Agent(object):
             pass
 
         elif suffix and not comment:
-            expression += suffix
+            expression += suffix.replace('\\', BOUNDARY_BACKSLASH_MARKER)
 
         return re.sub(r"(?s);\W*;", ";", expression)
 

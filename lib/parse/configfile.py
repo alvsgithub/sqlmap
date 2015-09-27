@@ -5,12 +5,8 @@ Copyright (c) 2006-2015 sqlmap developers (http://sqlmap.org/)
 See the file 'doc/COPYING' for copying permission
 """
 
-import codecs
-
-from ConfigParser import MissingSectionHeaderError
-from ConfigParser import ParsingError
-
 from lib.core.common import checkFile
+from lib.core.common import getSafeExString
 from lib.core.common import getUnicode
 from lib.core.common import openFile
 from lib.core.common import unArrayizeValue
@@ -20,7 +16,6 @@ from lib.core.data import logger
 from lib.core.exception import SqlmapMissingMandatoryOptionException
 from lib.core.exception import SqlmapSyntaxException
 from lib.core.optiondict import optDict
-from lib.core.settings import UNICODE_ENCODING
 
 config = None
 
@@ -73,7 +68,7 @@ def configFileParser(configFile):
         config = UnicodeRawConfigParser()
         config.readfp(configFP)
     except Exception, ex:
-        errMsg = "you have provided an invalid and/or unreadable configuration file ('%s')" % getUnicode(ex)
+        errMsg = "you have provided an invalid and/or unreadable configuration file ('%s')" % getSafeExString(ex)
         raise SqlmapSyntaxException(errMsg)
 
     if not config.has_section("Target"):

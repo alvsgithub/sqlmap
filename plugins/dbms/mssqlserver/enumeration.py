@@ -14,6 +14,7 @@ from lib.core.common import isNoneValue
 from lib.core.common import isNumPosStrValue
 from lib.core.common import isTechniqueAvailable
 from lib.core.common import safeSQLIdentificatorNaming
+from lib.core.common import safeStringFormat
 from lib.core.common import unArrayizeValue
 from lib.core.common import unsafeSQLIdentificatorNaming
 from lib.core.data import conf
@@ -136,7 +137,7 @@ class Enumeration(GenericEnumeration):
                 tables = []
 
                 for index in xrange(int(count)):
-                    _ = (rootQuery.blind.query if query == rootQuery.blind.count else rootQuery.blind.query2 if query == rootQuery.blind.count2 else rootQuery.blind.query3).replace("%s", db) % index
+                    _ = safeStringFormat((rootQuery.blind.query if query == rootQuery.blind.count else rootQuery.blind.query2 if query == rootQuery.blind.count2 else rootQuery.blind.query3).replace("%s", db), index)
 
                     table = inject.getValue(_, union=False, error=False)
                     if not isNoneValue(table):
@@ -151,7 +152,7 @@ class Enumeration(GenericEnumeration):
                     warnMsg += "for database '%s'" % db
                     logger.warn(warnMsg)
 
-        if not kb.data.cachedTables:
+        if not kb.data.cachedTables and not conf.search:
             errMsg = "unable to retrieve the tables for any database"
             raise SqlmapNoneDataException(errMsg)
         else:
@@ -183,7 +184,7 @@ class Enumeration(GenericEnumeration):
 
             infoMsg = "searching table"
             if tblConsider == "1":
-                infoMsg += "s like"
+                infoMsg += "s LIKE"
             infoMsg += " '%s'" % unsafeSQLIdentificatorNaming(tbl)
             logger.info(infoMsg)
 
@@ -216,7 +217,7 @@ class Enumeration(GenericEnumeration):
                 else:
                     infoMsg = "fetching number of table"
                     if tblConsider == "1":
-                        infoMsg += "s like"
+                        infoMsg += "s LIKE"
                     infoMsg += " '%s' in database '%s'" % (unsafeSQLIdentificatorNaming(tbl), unsafeSQLIdentificatorNaming(db))
                     logger.info(infoMsg)
 
@@ -228,7 +229,7 @@ class Enumeration(GenericEnumeration):
                     if not isNumPosStrValue(count):
                         warnMsg = "no table"
                         if tblConsider == "1":
-                            warnMsg += "s like"
+                            warnMsg += "s LIKE"
                         warnMsg += " '%s' " % unsafeSQLIdentificatorNaming(tbl)
                         warnMsg += "in database '%s'" % unsafeSQLIdentificatorNaming(db)
                         logger.warn(warnMsg)
@@ -294,7 +295,7 @@ class Enumeration(GenericEnumeration):
 
             infoMsg = "searching column"
             if colConsider == "1":
-                infoMsg += "s like"
+                infoMsg += "s LIKE"
             infoMsg += " '%s'" % unsafeSQLIdentificatorNaming(column)
 
             foundCols[column] = {}
@@ -335,7 +336,7 @@ class Enumeration(GenericEnumeration):
                             values = [values]
 
                         for foundTbl in values:
-                            foundTbl = safeSQLIdentificatorNaming(foundTbl, True)
+                            foundTbl = safeSQLIdentificatorNaming(unArrayizeValue(foundTbl), True)
 
                             if foundTbl is None:
                                 continue
@@ -366,7 +367,7 @@ class Enumeration(GenericEnumeration):
 
                     infoMsg = "fetching number of tables containing column"
                     if colConsider == "1":
-                        infoMsg += "s like"
+                        infoMsg += "s LIKE"
                     infoMsg += " '%s' in database '%s'" % (column, db)
                     logger.info("%s%s" % (infoMsg, infoMsgTbl))
 
@@ -379,7 +380,7 @@ class Enumeration(GenericEnumeration):
                     if not isNumPosStrValue(count):
                         warnMsg = "no tables contain column"
                         if colConsider == "1":
-                            warnMsg += "s like"
+                            warnMsg += "s LIKE"
                         warnMsg += " '%s' " % column
                         warnMsg += "in database '%s'" % db
                         logger.warn(warnMsg)

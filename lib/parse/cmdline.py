@@ -36,14 +36,17 @@ from lib.core.shell import clearHistory
 from lib.core.shell import loadHistory
 from lib.core.shell import saveHistory
 
-def cmdLineParser():
+def cmdLineParser(argv=None):
     """
     This function parses the command line parameters and arguments
     """
 
+    if not argv:
+        argv = sys.argv
+
     checkSystemEncoding()
 
-    _ = getUnicode(os.path.basename(sys.argv[0]), encoding=sys.getfilesystemencoding())
+    _ = getUnicode(os.path.basename(argv[0]), encoding=sys.getfilesystemencoding())
 
     usage = "%s%s [options]" % ("python " if not IS_WIN else "", \
             "\"%s\"" % _ if " " in _ else _)
@@ -127,6 +130,9 @@ def cmdLineParser():
         request.add_option("--referer", dest="referer",
                            help="HTTP Referer header value")
 
+        request.add_option("-H", "--header", dest="header",
+                           help="Extra header (e.g. \"X-Forwarded-For: 127.0.0.1\")")
+
         request.add_option("--headers", dest="headers",
                            help="Extra headers (e.g. \"Accept-Language: fr\\nETag: 123\")")
 
@@ -185,10 +191,16 @@ def cmdLineParser():
         request.add_option("--randomize", dest="rParam",
                            help="Randomly change value for given parameter(s)")
 
-        request.add_option("--safe-url", dest="safUrl",
+        request.add_option("--safe-url", dest="safeUrl",
                            help="URL address to visit frequently during testing")
 
-        request.add_option("--safe-freq", dest="saFreq", type="int",
+        request.add_option("--safe-post", dest="safePost",
+                           help="POST data to send to a safe URL")
+
+        request.add_option("--safe-req", dest="safeReqFile",
+                           help="Load safe HTTP request from a file")
+
+        request.add_option("--safe-freq", dest="safeFreq", type="int",
                            help="Test requests between two visits to a given safe URL")
 
         request.add_option("--skip-urlencode", dest="skipUrlEncode",
@@ -245,6 +257,9 @@ def cmdLineParser():
 
         injection.add_option("--skip", dest="skip",
                              help="Skip testing for given parameter(s)")
+
+        injection.add_option("--skip-static", dest="skipStatic", action="store_true",
+                             help="Skip testing parameters that not appear dynamic")
 
         injection.add_option("--dbms", dest="dbms",
                              help="Force back-end DBMS to this value")
@@ -650,8 +665,7 @@ def cmdLineParser():
         general.add_option("--pivot-column", dest="pivotColumn",
                                help="Pivot column name")
 
-        general.add_option("--save", dest="saveCmdline",
-                            action="store_true",
+        general.add_option("--save", dest="saveConfig",
                             help="Save options to a configuration INI file")
 
         general.add_option("--scope", dest="scope",
@@ -677,7 +691,7 @@ def cmdLineParser():
                                   help="Set question answers (e.g. \"quit=N,follow=N\")")
 
         miscellaneous.add_option("--beep", dest="beep", action="store_true",
-                                  help="Make a beep sound when SQL injection is found")
+                                  help="Beep on question and/or when SQL injection is found")
 
         miscellaneous.add_option("--cleanup", dest="cleanup",
                                   action="store_true",
@@ -699,9 +713,17 @@ def cmdLineParser():
                                   action="store_true",
                                   help="Make a thorough testing for a WAF/IPS/IDS protection")
 
+        miscellaneous.add_option("--skip-waf", dest="skipWaf",
+                                  action="store_true",
+                                  help="Skip heuristic detection of WAF/IPS/IDS protection")
+
         miscellaneous.add_option("--mobile", dest="mobile",
                                   action="store_true",
                                   help="Imitate smartphone through HTTP User-Agent header")
+
+        miscellaneous.add_option("--offline", dest="offline",
+                                  action="store_true",
+                                  help="Work in offline mode (only use session data)")
 
         miscellaneous.add_option("--page-rank", dest="pageRank",
                                   action="store_true",
@@ -739,6 +761,9 @@ def cmdLineParser():
                           help=SUPPRESS_HELP)
 
         parser.add_option("--force-dns", dest="forceDns", action="store_true",
+                          help=SUPPRESS_HELP)
+
+        parser.add_option("--force-threads", dest="forceThreads", action="store_true",
                           help=SUPPRESS_HELP)
 
         parser.add_option("--smoke-test", dest="smokeTest", action="store_true",
@@ -787,13 +812,15 @@ def cmdLineParser():
         option = parser.get_option("-h")
         option.help = option.help.capitalize().replace("this help", "basic help")
 
-        argv = []
+        _ = []
         prompt = False
         advancedHelp = True
+        extraHeaders = []
 
-        for arg in sys.argv:
-            argv.append(getUnicode(arg, encoding=sys.getfilesystemencoding()))
+        for arg in argv:
+            _.append(getUnicode(arg, encoding=sys.getfilesystemencoding()))
 
+        argv = _
         checkDeprecatedOptions(argv)
 
         prompt = "--sqlmap-shell" in argv
@@ -845,12 +872,17 @@ def cmdLineParser():
                 for arg in shlex.split(command):
                     argv.append(getUnicode(arg, encoding=sys.stdin.encoding))
             except ValueError, ex:
-                raise SqlmapSyntaxException, "something went wrong during command line parsing ('%s')" % ex
+                raise SqlmapSyntaxException, "something went wrong during command line parsing ('%s')" % ex.message
 
         # Hide non-basic options in basic help case
         for i in xrange(len(argv)):
             if argv[i] == "-hh":
                 argv[i] = "-h"
+            elif re.search(r"\A-\w=.+", argv[i]):
+                print "[!] potentially miswritten (illegal '=') short option detected ('%s')" % argv[i]
+            elif argv[i] == "-H":
+                if i + 1 < len(argv):
+                    extraHeaders.append(argv[i + 1])
             elif re.match(r"\A\d+!\Z", argv[i]) and argv[max(0, i - 1)] == "--threads" or re.match(r"\A--threads.+\d+!\Z", argv[i]):
                 argv[i] = argv[i][:-1]
                 conf.skipThreadCheck = True
@@ -878,6 +910,12 @@ def cmdLineParser():
             if "-h" in argv and not advancedHelp:
                 print "\n[!] to see full list of options run with '-hh'"
             raise
+
+        if extraHeaders:
+            if not args.headers:
+                args.headers = ""
+            delimiter = "\\n" if "\\n" in args.headers else "\n"
+            args.headers += delimiter + delimiter.join(extraHeaders)
 
         # Expand given mnemonic options (e.g. -z "ign,flu,bat")
         for i in xrange(len(argv) - 1):

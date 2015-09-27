@@ -6,7 +6,6 @@ See the file 'doc/COPYING' for copying permission
 """
 
 import cgi
-import codecs
 import hashlib
 import os
 import re
@@ -16,13 +15,13 @@ import threading
 from lib.core.common import Backend
 from lib.core.common import dataToDumpFile
 from lib.core.common import dataToStdout
+from lib.core.common import getSafeExString
 from lib.core.common import getUnicode
 from lib.core.common import isListLike
 from lib.core.common import normalizeUnicode
 from lib.core.common import openFile
 from lib.core.common import prioritySortColumns
 from lib.core.common import randomInt
-from lib.core.common import randomStr
 from lib.core.common import safeCSValue
 from lib.core.common import unicodeencode
 from lib.core.common import unsafeSQLIdentificatorNaming
@@ -76,7 +75,7 @@ class Dump(object):
         try:
             self._outputFP.write(text)
         except IOError, ex:
-            errMsg = "error occurred while writing to log file ('%s')" % ex
+            errMsg = "error occurred while writing to log file ('%s')" % getSafeExString(ex)
             raise SqlmapGenericException(errMsg)
 
         if kb.get("multiThreadMode"):
@@ -96,7 +95,7 @@ class Dump(object):
         try:
             self._outputFP = openFile(self._outputFile, "ab" if not conf.flushSession else "wb")
         except IOError, ex:
-            errMsg = "error occurred while opening log file ('%s')" % ex
+            errMsg = "error occurred while opening log file ('%s')" % getSafeExString(ex)
             raise SqlmapGenericException(errMsg)
 
     def getOutputFile(self):
@@ -637,11 +636,11 @@ class Dump(object):
 
         for column in dbColumnsDict.keys():
             if colConsider == "1":
-                colConsiderStr = "s like '%s' were" % unsafeSQLIdentificatorNaming(column)
+                colConsiderStr = "s LIKE '%s' were" % unsafeSQLIdentificatorNaming(column)
             else:
                 colConsiderStr = " '%s' was" % unsafeSQLIdentificatorNaming(column)
 
-            msg = "Column%s found in the " % colConsiderStr
+            msg = "column%s found in the " % colConsiderStr
             msg += "following databases:"
             self._write(msg)
 
