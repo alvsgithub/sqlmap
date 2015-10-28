@@ -37,7 +37,7 @@ optDict = {
                                "headers":           "string",
                                "authType":          "string",
                                "authCred":          "string",
-                               "authPrivate":       "string",
+                               "authFile":          "string",
                                "proxy":             "string",
                                "proxyCred":         "string",
                                "proxyFile":         "string",
@@ -205,6 +205,7 @@ optDict = {
                                "saveConfig":        "string",
                                "scope":             "string",
                                "testFilter":        "string",
+                               "testSkip":          "string",
                                "updateAll":         "boolean",
                              },
 

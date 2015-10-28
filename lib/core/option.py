@@ -779,6 +779,7 @@ def _setMetasploit():
                     kb.oldMsf = True
                 else:
                     msfEnvPathExists = False
+
                 conf.msfPath = path
                 break
 
@@ -809,7 +810,7 @@ def _setMetasploit():
         for envPath in envPaths:
             envPath = envPath.replace(";", "")
 
-            if all(os.path.exists(normalizePath(os.path.join(envPath, _))) for _ in ("", "msfcli", "msfconsole")):
+            if any(os.path.exists(normalizePath(os.path.join(envPath, _))) for _ in ("msfcli", "msfconsole")):
                 msfEnvPathExists = True
                 if all(os.path.exists(normalizePath(os.path.join(envPath, _))) for _ in ("msfvenom",)):
                     kb.oldMsf = False
@@ -970,7 +971,7 @@ def _setTamperingFunctions():
                 sys.path.insert(0, dirname)
 
             try:
-                module = __import__(filename[:-3])
+                module = __import__(filename[:-3].encode(sys.getfilesystemencoding()))
             except (ImportError, SyntaxError), msg:
                 raise SqlmapSyntaxException("cannot import tamper script '%s' (%s)" % (filename[:-3], msg))
 
@@ -1264,13 +1265,13 @@ def _setHTTPAuthentication():
 
     global authHandler
 
-    if not conf.authType and not conf.authCred and not conf.authPrivate:
+    if not conf.authType and not conf.authCred and not conf.authFile:
         return
 
-    if conf.authPrivate and not conf.authType:
+    if conf.authFile and not conf.authType:
         conf.authType = AUTH_TYPE.PKI
 
-    elif conf.authType and not conf.authCred and not conf.authPrivate:
+    elif conf.authType and not conf.authCred and not conf.authFile:
         errMsg = "you specified the HTTP authentication type, but "
         errMsg += "did not provide the credentials"
         raise SqlmapSyntaxException(errMsg)
@@ -1285,7 +1286,7 @@ def _setHTTPAuthentication():
         errMsg += "Basic, Digest, NTLM or PKI"
         raise SqlmapSyntaxException(errMsg)
 
-    if not conf.authPrivate:
+    if not conf.authFile:
         debugMsg = "setting the HTTP authentication type and credentials"
         logger.debug(debugMsg)
 
@@ -1336,7 +1337,7 @@ def _setHTTPAuthentication():
         debugMsg = "setting the HTTP(s) authentication PEM private key"
         logger.debug(debugMsg)
 
-        _ = safeExpandUser(conf.authPrivate)
+        _ = safeExpandUser(conf.authFile)
         checkFile(_)
         authHandler = HTTPSPKIAuthHandler(_)
 
@@ -1633,6 +1634,10 @@ def _cleanupOptions():
     if conf.testFilter:
         conf.testFilter = conf.testFilter.strip('*+')
         conf.testFilter = re.sub(r"([^.])([*+])", "\g<1>.\g<2>", conf.testFilter)
+
+    if conf.testSkip:
+        conf.testSkip = conf.testSkip.strip('*+')
+        conf.testSkip = re.sub(r"([^.])([*+])", "\g<1>.\g<2>", conf.testSkip)
 
     if "timeSec" not in kb.explicitSettings:
         if conf.tor:

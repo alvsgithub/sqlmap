@@ -415,7 +415,7 @@ class Databases:
         colList = filter(None, colList)
 
         if conf.tbl:
-            if Backend.getIdentifiedDbms() in (DBMS.ORACLE, DBMS.DB2):
+            if Backend.getIdentifiedDbms() in (DBMS.ORACLE, DBMS.DB2, DBMS.HSQLDB):
                 conf.tbl = conf.tbl.upper()
 
             tblList = conf.tbl.split(",")
@@ -674,7 +674,7 @@ class Databases:
                             continue
 
                 for index in getLimitRange(count):
-                    if Backend.getIdentifiedDbms() in (DBMS.MYSQL, DBMS.PGSQL):
+                    if Backend.getIdentifiedDbms() in (DBMS.MYSQL, DBMS.PGSQL, DBMS.HSQLDB):
                         query = rootQuery.blind.query % (unsafeSQLIdentificatorNaming(tbl), unsafeSQLIdentificatorNaming(conf.db))
                         query += condQuery
                         field = None

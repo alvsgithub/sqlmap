@@ -132,6 +132,8 @@ class Connect(object):
             logger.warn(warnMsg)
 
             conf.proxy = None
+            threadData.retriesCount = 0
+
             setHTTPProxy()
 
         if kb.testMode and kb.previousMethod == PAYLOAD.METHOD.TIME:
@@ -144,6 +146,7 @@ class Connect(object):
             warnMsg += "(e.g. '--flush-session --technique=BEUS') or try to "
             warnMsg += "lower the value of option '--time-sec' (e.g. '--time-sec=2')"
             singleTimeWarnMessage(warnMsg)
+
         elif kb.originalPage is None:
             if conf.tor:
                 warnMsg = "please make sure that you have "
@@ -160,12 +163,11 @@ class Connect(object):
                 warnMsg += "with the switch '--random-agent' turned on "
                 warnMsg += "and/or proxy switches ('--ignore-proxy', '--proxy',...)"
             singleTimeWarnMessage(warnMsg)
+
         elif conf.threads > 1:
             warnMsg = "if the problem persists please try to lower "
             warnMsg += "the number of used threads (option '--threads')"
             singleTimeWarnMessage(warnMsg)
-
-        time.sleep(1)
 
         kwargs['retrying'] = True
         return Connect._getPageProxy(**kwargs)
@@ -185,7 +187,11 @@ class Connect(object):
                     kb.pageCompress = False
             else:
                 while True:
-                    _ = conn.read(MAX_CONNECTION_CHUNK_SIZE)
+                    if not conn:
+                        break
+                    else:
+                        _ = conn.read(MAX_CONNECTION_CHUNK_SIZE)
+
                     if len(_) == MAX_CONNECTION_CHUNK_SIZE:
                         warnMsg = "large response detected. This could take a while"
                         singleTimeWarnMessage(warnMsg)
@@ -435,6 +441,11 @@ class Connect(object):
 
                 logger.log(CUSTOM_LOGGING.TRAFFIC_OUT, requestMsg)
 
+                if conf.cj:
+                    for cookie in conf.cj:
+                        if cookie.value is None:
+                            cookie.value = ""
+
                 conn = urllib2.urlopen(req)
 
                 if not kb.authHeader and getRequestHeader(req, HTTP_HEADER.AUTHORIZATION) and (conf.authType or "").lower() == AUTH_TYPE.BASIC.lower():
@@ -621,7 +632,11 @@ class Connect(object):
                 return None, None, None
             elif threadData.retriesCount < conf.retries and not kb.threadException:
                 warnMsg += ". sqlmap is going to retry the request"
-                logger.critical(warnMsg)
+                if not retrying:
+                    warnMsg += "(s)"
+                    logger.critical(warnMsg)
+                else:
+                    logger.debug(warnMsg)
                 return Connect._retryProxy(**kwargs)
             elif kb.testMode:
                 logger.critical(warnMsg)
@@ -836,7 +851,7 @@ class Connect(object):
                     if headers and "text/plain" in headers.get(HTTP_HEADER.CONTENT_TYPE, ""):
                         token = page
 
-                if not token and any(_.name == conf.csrfToken for _ in conf.cj):
+                if not token and conf.cj and any(_.name == conf.csrfToken for _ in conf.cj):
                     for _ in conf.cj:
                         if _.name == conf.csrfToken:
                             token = _.value

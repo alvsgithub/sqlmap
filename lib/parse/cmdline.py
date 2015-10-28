@@ -144,8 +144,8 @@ def cmdLineParser(argv=None):
                            help="HTTP authentication credentials "
                                 "(name:password)")
 
-        request.add_option("--auth-private", dest="authPrivate",
-                           help="HTTP authentication PEM private key file")
+        request.add_option("--auth-file", dest="authFile",
+                           help="HTTP authentication PEM cert/private key file")
 
         request.add_option("--ignore-401", dest="ignore401", action="store_true",
                           help="Ignore HTTP Error 401 (Unauthorized)")
@@ -674,6 +674,9 @@ def cmdLineParser(argv=None):
         general.add_option("--test-filter", dest="testFilter",
                            help="Select tests by payloads and/or titles (e.g. ROW)")
 
+        general.add_option("--test-skip", dest="testSkip",
+                           help="Skip tests by payloads and/or titles (e.g. BENCHMARK)")
+
         general.add_option("--update", dest="updateAll",
                             action="store_true",
                             help="Update sqlmap")
@@ -776,6 +779,9 @@ def cmdLineParser(argv=None):
                           help=SUPPRESS_HELP)
 
         parser.add_option("--run-case", dest="runCase", help=SUPPRESS_HELP)
+
+        parser.add_option("--nnc5ed", dest="nnc5ed", action="store_true",
+                          help=SUPPRESS_HELP)  # temporary hidden switch :)
 
         parser.add_option_group(target)
         parser.add_option_group(request)

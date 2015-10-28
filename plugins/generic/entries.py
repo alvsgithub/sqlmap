@@ -275,7 +275,7 @@ class Entries:
                     else:
                         emptyColumns = []
                         plusOne = Backend.getIdentifiedDbms() in (DBMS.ORACLE, DBMS.DB2)
-                        indexRange = getLimitRange(count, dump=True, plusOne=plusOne)
+                        indexRange = getLimitRange(count, plusOne=plusOne)
 
                         if len(colList) < len(indexRange) > CHECK_ZERO_COLUMNS_THRESHOLD:
                             for column in colList:
@@ -296,7 +296,7 @@ class Entries:
                                     if column not in entries:
                                         entries[column] = BigArray()
 
-                                    if Backend.getIdentifiedDbms() in (DBMS.MYSQL, DBMS.PGSQL):
+                                    if Backend.getIdentifiedDbms() in (DBMS.MYSQL, DBMS.PGSQL, DBMS.HSQLDB):
                                         query = rootQuery.blind.query % (agent.preprocessField(tbl, column), conf.db, conf.tbl, sorted(colList, key=len)[0], index)
                                     elif Backend.getIdentifiedDbms() in (DBMS.ORACLE, DBMS.DB2):
                                         query = rootQuery.blind.query % (agent.preprocessField(tbl, column),

@@ -202,7 +202,7 @@ class Format(object):
         if versions is None and Backend.getVersionList():
             versions = Backend.getVersionList()
 
-        return Backend.getDbms() if versions is None else "%s %s" % (Backend.getDbms(), " and ".join(v for v in versions))
+        return Backend.getDbms() if versions is None else "%s %s" % (Backend.getDbms(), " and ".join(filter(None, versions)))
 
     @staticmethod
     def getErrorParsedDBMSes():
@@ -471,15 +471,17 @@ class Backend:
 
     @staticmethod
     def getVersion():
-        if len(kb.dbmsVersion) > 0:
-            return kb.dbmsVersion[0]
+        versions = filter(None, flattenValue(kb.dbmsVersion))
+        if not isNoneValue(versions):
+            return versions[0]
         else:
             return None
 
     @staticmethod
     def getVersionList():
-        if len(kb.dbmsVersion) > 0:
-            return kb.dbmsVersion
+        versions = filter(None, flattenValue(kb.dbmsVersion))
+        if not isNoneValue(versions):
+            return versions
         else:
             return None
 
@@ -1370,7 +1372,7 @@ def expandAsteriskForColumns(expression):
 
     return expression
 
-def getLimitRange(count, dump=False, plusOne=False):
+def getLimitRange(count, plusOne=False):
     """
     Returns range of values used in limit/offset constructs
 
@@ -1382,12 +1384,11 @@ def getLimitRange(count, dump=False, plusOne=False):
     count = int(count)
     limitStart, limitStop = 1, count
 
-    if dump:
-        if isinstance(conf.limitStop, int) and conf.limitStop > 0 and conf.limitStop < limitStop:
-            limitStop = conf.limitStop
+    if isinstance(conf.limitStop, int) and conf.limitStop > 0 and conf.limitStop < limitStop:
+        limitStop = conf.limitStop
 
-        if isinstance(conf.limitStart, int) and conf.limitStart > 0 and conf.limitStart <= limitStop:
-            limitStart = conf.limitStart
+    if isinstance(conf.limitStart, int) and conf.limitStart > 0 and conf.limitStart <= limitStop:
+        limitStart = conf.limitStart
 
     retVal = xrange(limitStart, limitStop + 1) if plusOne else xrange(limitStart - 1, limitStop)
 
@@ -1876,8 +1877,13 @@ def readCachedFileContent(filename, mode='rb'):
         with kb.locks.cache:
             if filename not in kb.cache.content:
                 checkFile(filename)
-                with openFile(filename, mode) as f:
-                    kb.cache.content[filename] = f.read()
+                try:
+	                with openFile(filename, mode) as f:
+	                    kb.cache.content[filename] = f.read()
+                except (IOError, OSError, MemoryError), ex:
+                    errMsg = "something went wrong while trying "
+                    errMsg += "to read the content of file '%s' ('%s')" % (filename, ex)
+                    raise SqlmapSystemException(errMsg)
 
     return kb.cache.content[filename]
 
@@ -2499,7 +2505,10 @@ def extractTextTagContent(page):
     page = page or ""
 
     if REFLECTED_VALUE_MARKER in page:
-        page = re.sub(r"(?si)[^\s>]*%s[^\s<]*" % REFLECTED_VALUE_MARKER, "", page)
+        try:
+            page = re.sub(r"(?i)[^\s>]*%s[^\s<]*" % REFLECTED_VALUE_MARKER, "", page)
+        except MemoryError:
+            page = page.replace(REFLECTED_VALUE_MARKER, "")
 
     return filter(None, (_.group('result').strip() for _ in re.finditer(TEXT_TAG_REGEX, page)))
 
@@ -2691,7 +2700,7 @@ def parseSqliteTableSchema(value):
         table = {}
         columns = {}
 
-        for match in re.finditer(r"(\w+)\s+(INT|INTEGER|TINYINT|SMALLINT|MEDIUMINT|BIGINT|UNSIGNED BIG INT|INT2|INT8|INTEGER|CHARACTER|VARCHAR|VARYING CHARACTER|NCHAR|NATIVE CHARACTER|NVARCHAR|TEXT|CLOB|TEXT|BLOB|NONE|REAL|DOUBLE|DOUBLE PRECISION|FLOAT|REAL|NUMERIC|DECIMAL|BOOLEAN|DATE|DATETIME|NUMERIC)\b", value, re.I):
+        for match in re.finditer(r"(\w+)[\"'`]?\s+(INT|INTEGER|TINYINT|SMALLINT|MEDIUMINT|BIGINT|UNSIGNED BIG INT|INT2|INT8|INTEGER|CHARACTER|VARCHAR|VARYING CHARACTER|NCHAR|NATIVE CHARACTER|NVARCHAR|TEXT|CLOB|TEXT|BLOB|NONE|REAL|DOUBLE|DOUBLE PRECISION|FLOAT|REAL|NUMERIC|DECIMAL|BOOLEAN|DATE|DATETIME|NUMERIC)\b", value, re.I):
             columns[match.group(1)] = match.group(2)
 
         table[conf.tbl] = columns
@@ -2810,7 +2819,13 @@ def unArrayizeValue(value):
     """
 
     if isListLike(value):
-        value = value[0] if len(value) > 0 else None
+        if not value:
+            value = None
+        elif len(value) == 1 and not isListLike(value[0]):
+            value = value[0]
+        else:
+            _ = filter(lambda _: _ is not None, (_ for _ in flattenValue(value)))
+            value = _[0] if len(_) > 0 else None
 
     return value
 
@@ -3030,7 +3045,7 @@ def maskSensitiveData(msg):
 
     retVal = getUnicode(msg)
 
-    for item in filter(None, map(lambda x: conf.get(x), ("hostname", "googleDork", "authCred", "proxyCred", "tbl", "db", "col", "user", "cookie", "proxy", "rFile", "wFile", "dFile"))):
+    for item in filter(None, map(lambda x: conf.get(x), ("hostname", "data", "googleDork", "authCred", "proxyCred", "tbl", "db", "col", "user", "cookie", "proxy", "rFile", "wFile", "dFile"))):
         regex = SENSITIVE_DATA_REGEX % re.sub("(\W)", r"\\\1", getUnicode(item))
         while extractRegexResult(regex, retVal):
             value = extractRegexResult(regex, retVal)
