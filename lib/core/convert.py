@@ -1,17 +1,20 @@
 #!/usr/bin/env python
 
 """
-Copyright (c) 2006-2015 sqlmap developers (http://sqlmap.org/)
+Copyright (c) 2006-2016 sqlmap developers (http://sqlmap.org/)
 See the file 'doc/COPYING' for copying permission
 """
 
 import base64
 import json
 import pickle
+import re
+import StringIO
 import sys
 
 from lib.core.settings import IS_WIN
 from lib.core.settings import UNICODE_ENCODING
+from lib.core.settings import PICKLE_REDUCE_WHITELIST
 
 def base64decode(value):
     """
@@ -67,10 +70,23 @@ def base64unpickle(value):
 
     retVal = None
 
+    def _(self):
+        if len(self.stack) > 1:
+            func = self.stack[-2]
+            if func not in PICKLE_REDUCE_WHITELIST:
+                raise Exception, "abusing reduce() is bad, Mkay!"
+        self.load_reduce()
+
+    def loads(str):
+        file = StringIO.StringIO(str)
+        unpickler = pickle.Unpickler(file)
+        unpickler.dispatch[pickle.REDUCE] = _
+        return unpickler.load()
+
     try:
-        retVal = pickle.loads(base64decode(value))
+        retVal = loads(base64decode(value))
     except TypeError: 
-        retVal = pickle.loads(base64decode(bytes(value)))
+        retVal = loads(base64decode(bytes(value)))
 
     return retVal
 
@@ -143,6 +159,10 @@ def htmlunescape(value):
     if value and isinstance(value, basestring):
         codes = (('&lt;', '<'), ('&gt;', '>'), ('&quot;', '"'), ('&nbsp;', ' '), ('&amp;', '&'))
         retVal = reduce(lambda x, y: x.replace(y[0], y[1]), codes, retVal)
+        try:
+            retVal = re.sub(r"&#x([^ ;]+);", lambda match: unichr(int(match.group(1), 16)), retVal)
+        except ValueError:
+            pass
     return retVal
 
 def singleTimeWarnMessage(message):  # Cross-linked function

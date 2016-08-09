@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 """
-Copyright (c) 2006-2015 sqlmap developers (http://sqlmap.org/)
+Copyright (c) 2006-2016 sqlmap developers (http://sqlmap.org/)
 See the file 'doc/COPYING' for copying permission
 """
 
@@ -53,10 +53,10 @@ def _findUnionCharCount(comment, place, parameter, value, prefix, suffix, where=
             query = agent.suffixQuery(query, suffix=suffix, comment=comment)
             payload = agent.payload(newValue=query, place=place, parameter=parameter, where=where)
             page, headers = Request.queryPage(payload, place=place, content=True, raise404=False)
-            return not re.search(r"(warning|error|order by|failed)", page or "", re.I) and comparison(page, headers) or re.search(r"data types cannot be compared or sorted", page or "", re.I)
+            return not any(re.search(_, page or "", re.I) and not re.search(_, kb.pageTemplate or "", re.I) for _ in ("(warning|error):", "order by", "unknown column", "failed")) and comparison(page, headers) or re.search(r"data types cannot be compared or sorted", page or "", re.I)
 
         if _orderByTest(1) and not _orderByTest(randomInt()):
-            infoMsg = "ORDER BY technique seems to be usable. "
+            infoMsg = "'ORDER BY' technique appears to be usable. "
             infoMsg += "This should reduce the time needed "
             infoMsg += "to find the right number "
             infoMsg += "of query columns. Automatically extending the "
@@ -120,8 +120,10 @@ def _findUnionCharCount(comment, place, parameter, value, prefix, suffix, where=
                     break
 
         if not retVal:
-            ratios.pop(ratios.index(min_))
-            ratios.pop(ratios.index(max_))
+            if min_ in ratios:
+                ratios.pop(ratios.index(min_))
+            if max_ in ratios:
+                ratios.pop(ratios.index(max_))
 
             minItem, maxItem = None, None
 
@@ -226,7 +228,7 @@ def _unionPosition(comment, place, parameter, prefix, suffix, count, where=PAYLO
                         if content.count(phrase) > 0 and content.count(phrase) < LIMITED_ROWS_TEST_NUMBER:
                             warnMsg = "output with limited number of rows detected. Switching to partial mode"
                             logger.warn(warnMsg)
-                            vector = (position, count, comment, prefix, suffix, kb.uChar, PAYLOAD.WHERE.NEGATIVE, kb.unionDuplicates, False)
+                            vector = (position, count, comment, prefix, suffix, kb.uChar, where, kb.unionDuplicates, True)
 
                 unionErrorCase = kb.errorIsNone and wasLastResponseDBMSError()
 

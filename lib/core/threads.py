@@ -1,11 +1,12 @@
 #!/usr/bin/env python
 
 """
-Copyright (c) 2006-2015 sqlmap developers (http://sqlmap.org/)
+Copyright (c) 2006-2016 sqlmap developers (http://sqlmap.org/)
 See the file 'doc/COPYING' for copying permission
 """
 
 import difflib
+import random
 import threading
 import time
 import traceback
@@ -43,6 +44,7 @@ class _ThreadData(threading.local):
         self.inTransaction = False
         self.lastComparisonPage = None
         self.lastComparisonHeaders = None
+        self.lastComparisonCode = None
         self.lastErrorPage = None
         self.lastHTTPError = None
         self.lastRedirectMsg = None
@@ -51,6 +53,7 @@ class _ThreadData(threading.local):
         self.lastRequestMsg = None
         self.lastRequestUID = 0
         self.lastRedirectURL = None
+        self.random = random.WichmannHill()
         self.resumed = False
         self.retriesCount = 0
         self.seqMatcher = difflib.SequenceMatcher(None)
@@ -199,8 +202,11 @@ def runThreads(numThreads, threadFunction, cleanupFunction=None, forwardExceptio
         kb.threadException = False
 
         for lock in kb.locks.values():
-            if lock.locked_lock():
-                lock.release()
+            if lock.locked():
+                try:
+                    lock.release()
+                except thread.error:
+                    pass
 
         if conf.get("hashDB"):
             conf.hashDB.flush(True)

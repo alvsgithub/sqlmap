@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 """
-Copyright (c) 2006-2015 sqlmap developers (http://sqlmap.org/)
+Copyright (c) 2006-2016 sqlmap developers (http://sqlmap.org/)
 See the file 'doc/COPYING' for copying permission
 """
 
@@ -137,6 +137,7 @@ class Entries:
                     logger.warn(warnMsg)
                     continue
 
+                kb.dumpColumns = colList
                 colNames = colString = ", ".join(column for column in colList)
                 rootQuery = queries[Backend.getIdentifiedDbms()].dump_table
 
@@ -167,7 +168,14 @@ class Entries:
                         if not (isTechniqueAvailable(PAYLOAD.TECHNIQUE.UNION) and kb.injection.data[PAYLOAD.TECHNIQUE.UNION].where == PAYLOAD.WHERE.ORIGINAL):
                             table = "%s.%s" % (conf.db, tbl)
 
-                            retVal = pivotDumpTable(table, colList, blind=False)
+                            try:
+                                retVal = pivotDumpTable(table, colList, blind=False)
+                            except KeyboardInterrupt:
+                                retVal = None
+                                kb.dumpKeyboardInterrupt = True
+                                clearConsoleLine()
+                                warnMsg = "Ctrl+C detected in dumping phase"
+                                logger.warn(warnMsg)
 
                             if retVal:
                                 entries, _ = retVal
@@ -205,8 +213,7 @@ class Entries:
                                 else:
                                     colEntry = unArrayizeValue(entry[index]) if index < len(entry) else u''
 
-                                _ = len(DUMP_REPLACEMENTS.get(getUnicode(colEntry), getUnicode(colEntry)))
-                                maxLen = max(len(column), _)
+                                maxLen = max(len(column), len(DUMP_REPLACEMENTS.get(getUnicode(colEntry), getUnicode(colEntry))))
 
                                 if maxLen > kb.data.dumpedTable[column]["length"]:
                                     kb.data.dumpedTable[column]["length"] = maxLen
@@ -267,7 +274,14 @@ class Entries:
                         elif Backend.isDbms(DBMS.MAXDB):
                             table = "%s.%s" % (conf.db, tbl)
 
-                        retVal = pivotDumpTable(table, colList, count, blind=True)
+                        try:
+                            retVal = pivotDumpTable(table, colList, count, blind=True)
+                        except KeyboardInterrupt:
+                            retVal = None
+                            kb.dumpKeyboardInterrupt = True
+                            clearConsoleLine()
+                            warnMsg = "Ctrl+C detected in dumping phase"
+                            logger.warn(warnMsg)
 
                         if retVal:
                             entries, lengths = retVal
@@ -278,8 +292,11 @@ class Entries:
                         indexRange = getLimitRange(count, plusOne=plusOne)
 
                         if len(colList) < len(indexRange) > CHECK_ZERO_COLUMNS_THRESHOLD:
+                            debugMsg = "checking for empty columns"
+                            logger.debug(infoMsg)
+
                             for column in colList:
-                                if inject.getValue("SELECT COUNT(%s) FROM %s" % (column, kb.dumpTable), union=False, error=False) == '0':
+                                if not inject.checkBooleanExpression("(SELECT COUNT(%s) FROM %s)>0" % (column, kb.dumpTable)):
                                     emptyColumns.append(column)
                                     debugMsg = "column '%s' of table '%s' will not be " % (column, kb.dumpTable)
                                     debugMsg += "dumped as it appears to be empty"
@@ -313,11 +330,11 @@ class Entries:
                                     value = NULL if column in emptyColumns else inject.getValue(query, union=False, error=False, dump=True)
                                     value = '' if value is None else value
 
-                                    _ = DUMP_REPLACEMENTS.get(getUnicode(value), getUnicode(value))
-                                    lengths[column] = max(lengths[column], len(_))
+                                    lengths[column] = max(lengths[column], len(DUMP_REPLACEMENTS.get(getUnicode(value), getUnicode(value))))
                                     entries[column].append(value)
 
                         except KeyboardInterrupt:
+                            kb.dumpKeyboardInterrupt = True
                             clearConsoleLine()
                             warnMsg = "Ctrl+C detected in dumping phase"
                             logger.warn(warnMsg)
@@ -354,6 +371,7 @@ class Entries:
                 logger.critical(errMsg)
 
             finally:
+                kb.dumpColumns = None
                 kb.dumpTable = None
 
     def dumpAll(self):

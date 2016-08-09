@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 """
-Copyright (c) 2006-2015 sqlmap developers (http://sqlmap.org/)
+Copyright (c) 2006-2016 sqlmap developers (http://sqlmap.org/)
 See the file 'doc/COPYING' for copying permission
 """
 
@@ -38,9 +38,9 @@ class SmartRedirectHandler(urllib2.HTTPRedirectHandler):
 
         if headers:
             if "location" in headers:
-                retVal = headers.getheaders("location")[0].split("?")[0]
+                retVal = headers.getheaders("location")[0]
             elif "uri" in headers:
-                retVal = headers.getheaders("uri")[0].split("?")[0]
+                retVal = headers.getheaders("uri")[0]
 
         return retVal
 

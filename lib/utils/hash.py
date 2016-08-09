@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 """
-Copyright (c) 2006-2015 sqlmap developers (http://sqlmap.org/)
+Copyright (c) 2006-2016 sqlmap developers (http://sqlmap.org/)
 See the file 'doc/COPYING' for copying permission
 """
 
@@ -30,6 +30,7 @@ import os
 import re
 import tempfile
 import time
+import zipfile
 
 from hashlib import md5
 from hashlib import sha1
@@ -45,6 +46,7 @@ from lib.core.common import dataToStdout
 from lib.core.common import getFileItems
 from lib.core.common import getPublicTypeMembers
 from lib.core.common import getSafeExString
+from lib.core.common import getUnicode
 from lib.core.common import hashDBRetrieve
 from lib.core.common import hashDBWrite
 from lib.core.common import normalizeUnicode
@@ -60,6 +62,8 @@ from lib.core.data import kb
 from lib.core.data import logger
 from lib.core.enums import DBMS
 from lib.core.enums import HASH
+from lib.core.enums import MKSTEMP_PREFIX
+from lib.core.exception import SqlmapDataException
 from lib.core.exception import SqlmapUserQuitException
 from lib.core.settings import COMMON_PASSWORD_SUFFIXES
 from lib.core.settings import COMMON_USER_COLUMNS
@@ -122,6 +126,13 @@ def postgres_passwd(password, username, uppercase=False):
     >>> postgres_passwd(password='testpass', username='testuser', uppercase=False)
     'md599e5ea7a6f7c3269995cba3927fd0093'
     """
+
+
+    if isinstance(username, unicode):
+        username = unicode.encode(username, UNICODE_ENCODING)
+
+    if isinstance(password, unicode):
+        password = unicode.encode(password, UNICODE_ENCODING)
 
     retVal = "md5%s" % md5(password + username).hexdigest()
 
@@ -207,7 +218,10 @@ def oracle_old_passwd(password, username, uppercase=True):  # prior to version '
     IV, pad = "\0" * 8, "\0"
 
     if isinstance(username, unicode):
-        username = unicode.encode(username, UNICODE_ENCODING)  # pyDes has issues with unicode strings
+        username = unicode.encode(username, UNICODE_ENCODING)
+
+    if isinstance(password, unicode):
+        password = unicode.encode(password, UNICODE_ENCODING)
 
     unistr = "".join("\0%s" % c for c in (username + password).upper())
 
@@ -327,7 +341,8 @@ def wordpress_passwd(password, salt, count, prefix, uppercase=False):
 
         return output
 
-    password = password.encode(UNICODE_ENCODING)
+    if isinstance(password, unicode):
+        password = password.encode(UNICODE_ENCODING)
 
     cipher = md5(salt)
     cipher.update(password)
@@ -373,7 +388,7 @@ def storeHashesToFile(attack_dict):
     if not kb.storeHashesChoice:
         return
 
-    handle, filename = tempfile.mkstemp(prefix="sqlmaphashes-", suffix=".txt")
+    handle, filename = tempfile.mkstemp(prefix=MKSTEMP_PREFIX.HASHES, suffix=".txt")
     os.close(handle)
 
     infoMsg = "writing hashes to a temporary file '%s' " % filename
@@ -490,7 +505,7 @@ def attackDumpedTable():
                         value = table[column]['values'][i]
 
                         if value and value.lower() in lut:
-                            table[column]['values'][i] += " (%s)" % lut[value.lower()]
+                            table[column]['values'][i] = "%s (%s)" % (getUnicode(table[column]['values'][i]), getUnicode(lut[value.lower()]))
                             table[column]['length'] = max(table[column]['length'], len(table[column]['values'][i]))
 
 def hashRecognition(value):
@@ -773,6 +788,14 @@ def dictionaryAttack(attack_dict):
 
                     for dictPath in dictPaths:
                         checkFile(dictPath)
+
+                        if os.path.splitext(dictPath)[1].lower() == ".zip":
+                            _ = zipfile.ZipFile(dictPath, 'r')
+                            if len(_.namelist()) == 0:
+                                errMsg = "no file(s) inside '%s'" % dictPath
+                                raise SqlmapDataException(errMsg)
+                            else:
+                                _.open(_.namelist()[0])
 
                     kb.wordlists = dictPaths
 
